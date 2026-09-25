@@ -1,10 +1,23 @@
-# ACS — Air Crack Station
+# ACS-app — Air Crack Station
 
-**Made by Pakun & iinze0**
+Python desktop client for [ACS](https://github.com/iinze0/ACS).
 
-This is the desktop app.
+[![release](https://img.shields.io/github/v/release/iinze0/ACS-app?style=flat-square)](https://github.com/iinze0/ACS-app/releases/latest)
+Made by [Pakun](https://github.com/brazyqueso) & [iinze0](https://github.com/iinze0)
 
-## Install (use dpkg — apt /tmp will fail)
+Same station, in a window. Ships as a `.deb`, launches with `sudo ACS-app`, and checks GitHub for a newer package on start.
+
+## Family
+
+| Repo | What you get |
+|:-----|:-------------|
+| **[ACS](https://github.com/iinze0/ACS)** | Shell station |
+| **[ACS-app](https://github.com/iinze0/ACS-app)** | This repo — Python desktop app |
+| **[ACS-cpp](https://github.com/iinze0/ACS-cpp)** | Native C++ / GTK app |
+
+## Install
+
+Use `dpkg`. Installing a local `.deb` from `/tmp` with `apt` will fail.
 
 ```bash
 wget -O /tmp/acs-app.deb https://github.com/iinze0/ACS-app/releases/download/v1.4.0/acs-app_1.4.0_all.deb
@@ -19,25 +32,21 @@ curl -fsSL https://raw.githubusercontent.com/iinze0/ACS-app/main/install-acs-app
 sudo ACS-app
 ```
 
-You should see **v1.4.0** and **Made by Pakun & iinze0**.
+Confirm the package:
 
 ```bash
 dpkg -s acs-app | grep Version
 ```
 
-Uninstall: `sudo apt purge acs-app`
+You should see **v1.4.0** and **Made by Pakun & iinze0**.
 
-## C++ app
-
-The native build is on GitHub too: [iinze0/ACS-cpp](https://github.com/iinze0/ACS-cpp)
+Uninstall:
 
 ```bash
-wget -O /tmp/acs-cpp.deb https://github.com/iinze0/ACS-cpp/releases/download/v1.0.0/acs-cpp_1.0.0_amd64.deb
-sudo dpkg -i /tmp/acs-cpp.deb
-sudo ACS-cpp
+sudo apt purge acs-app
 ```
 
-If the window says Tk is missing:
+If the window reports missing Tk:
 
 ```bash
 sudo apt-get install -y python3-tk
@@ -50,11 +59,24 @@ sudo ACS-app
 sudo ACS-app
 ```
 
-Also: **Applications → ACS**
+Also available from **Applications → ACS**.
 
-Authorized lab / pentest use only. On launch, the app checks GitHub and installs a newer package by itself.
+## Native build
 
+Prefer C++ / GTK? Install [ACS-cpp](https://github.com/iinze0/ACS-cpp):
+
+```bash
+wget -O /tmp/acs-cpp.deb https://github.com/iinze0/ACS-cpp/releases/download/v1.0.0/acs-cpp_1.0.0_amd64.deb
+sudo dpkg -i /tmp/acs-cpp.deb
+sudo ACS-cpp
 ```
-github.com/iinze0
-github.com/iinze0/ACS-app
-```
+
+## Disclaimer
+
+Authorized lab and pentest use only. Only run this on networks you own or have written permission to test.
+
+<p align="center">
+  <a href="https://github.com/iinze0">iinze0</a> ·
+  <a href="https://github.com/brazyqueso">Pakun</a> ·
+  <a href="https://github.com/iinze0/ACS-app">ACS-app</a>
+</p>
