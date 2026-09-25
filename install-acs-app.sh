@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ACS app installer — Made by Pakun & iinze0
 set -euo pipefail
-VER="${ACS_APP_VER:-1.3.0}"
+VER="${ACS_APP_VER:-1.4.0}"
 URL="https://github.com/iinze0/ACS-app/releases/download/v${VER}/acs-app_${VER}_all.deb"
 DEB="/tmp/acs-app_${VER}_all.deb"
 
