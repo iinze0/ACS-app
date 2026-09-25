@@ -17,3 +17,22 @@ Description: ACS app — Air Crack Station (Made by Pakun & iinze0)
  Desktop app for authorized lab / pentest work.
  Launch with: sudo ACS-app
 
+Package: acs-app
+Version: 1.3.0
+Architecture: all
+Maintainer: Pakun & iinze0 <iinze0@users.noreply.github.com>
+Installed-Size: 132
+Depends: python3
+Recommends: python3-tk, aircrack-ng, iw, wireless-tools, hashcat, hcxdumptool, hcxtools, proxychains4, curl
+Filename: ./acs-app_1.3.0_all.deb
+Size: 11884
+MD5sum: f9d370cefc01745accdd5ba32edab3c3
+SHA1: 717f2db2e2cafca1d636a05a47385a4933552fa4
+SHA256: b41ecea443ba5008fb17e3bfa4b1be175e1508b4f0fa0170765d1fa8fce681af
+Section: utils
+Priority: optional
+Homepage: https://github.com/iinze0/ACS-app
+Description: ACS app — Air Crack Station (Made by Pakun & iinze0)
+ Desktop app for authorized lab / pentest work.
+ Launch with: sudo ACS-app
+

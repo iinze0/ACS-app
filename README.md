@@ -7,7 +7,7 @@ This is the desktop app.
 ## Install (use dpkg — apt /tmp will fail)
 
 ```bash
-wget -O /tmp/acs-app.deb https://github.com/iinze0/ACS-app/releases/download/v1.2.0/acs-app_1.2.0_all.deb
+wget -O /tmp/acs-app.deb https://github.com/iinze0/ACS-app/releases/download/v1.3.0/acs-app_1.3.0_all.deb
 sudo dpkg -i /tmp/acs-app.deb
 sudo ACS-app
 ```
@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/iinze0/ACS-app/main/install-acs-app
 sudo ACS-app
 ```
 
-You should see **v1.2.0** and **Made by Pakun & iinze0**.
+You should see **v1.3.0** and **Made by Pakun & iinze0**.
 
 ```bash
 dpkg -s acs-app | grep Version

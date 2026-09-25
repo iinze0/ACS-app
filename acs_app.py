@@ -27,18 +27,22 @@ except ImportError:
 HOME = Path.home() / ".acs"
 SESSION = HOME / "app-session.json"
 CONF = HOME / "proxychains.conf"
-APP_VER = "1.2.0"
+APP_VER = "1.3.0"
 APP_RAW = "https://raw.githubusercontent.com/iinze0/ACS-app/main/acs_app.py"
 APP_VERSION_URL = "https://raw.githubusercontent.com/iinze0/ACS-app/main/VERSION"
 
-BG = "#07090a"
-SURFACE = "#101614"
-RAISED = "#18211c"
-FG = "#d7f5e3"
-MUTED = "#6d8a7a"
+BG = "#0b0e0c"
+SURFACE = "#121815"
+CARD = "#171e1a"
+RAISED = "#1c2620"
+FG = "#e7f6ee"
+MUTED = "#8aa394"
 ACCENT = "#3dff8a"
 WARN = "#e8c547"
+DANGER = "#ff8d8d"
 LINE = "#24332b"
+UI = "DejaVu Sans"
+MONO = "DejaVu Sans Mono"
 
 SOURCES = {
     "socks5": [
@@ -109,8 +113,8 @@ class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"ACS {APP_VER}")
-        self.geometry("1100x720")
-        self.minsize(860, 560)
+        self.geometry("1180x800")
+        self.minsize(980, 640)
         self.configure(bg=BG)
         self.session = load_session()
         self.vars = {k: tk.StringVar(value=v) for k, v in self.session.items()}
@@ -119,50 +123,72 @@ class App(tk.Tk):
         self.proxies: list[str] = []
         self.kind = tk.StringVar(value="socks5")
         self.hops = tk.StringVar(value="8")
+        self.scan_for = tk.StringVar(value="15")
+        self.target_line = tk.StringVar(value="No target locked")
         self.page = tk.StringVar(value="Station")
+        self.clients: list[tuple[str, str, str, str]] = []
+        self.nav_btns: dict[str, tk.Button] = {}
         self._build()
+        for var in self.vars.values():
+            var.trace_add("write", self._refresh_status)
+        self._refresh_status()
         self.after(120, self._drain)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
     def _build(self) -> None:
-        top = tk.Frame(self, bg=SURFACE, highlightbackground=LINE, highlightthickness=1)
+        top = tk.Frame(self, bg=SURFACE)
         top.pack(fill="x")
-        tk.Label(top, text="ACS", bg=SURFACE, fg=ACCENT, font=("sans-serif", 16, "bold")).pack(
-            side="left", padx=16, pady=10
-        )
+        brand = tk.Frame(top, bg=SURFACE)
+        brand.pack(side="left", padx=22, pady=16)
+        tk.Label(brand, text="ACS", bg=SURFACE, fg=ACCENT, font=(UI, 22, "bold")).pack(anchor="w")
         tk.Label(
-            top,
-            text="Air Crack Station   ·   Pakun & iinze0",
+            brand,
+            text="Air Crack Station  ·  Pakun & iinze0",
             bg=SURFACE,
             fg=MUTED,
-            font=("sans-serif", 10),
-        ).pack(side="left")
-        self.status = tk.Label(top, text="lab only", bg=SURFACE, fg=ACCENT, font=("sans-serif", 10))
-        self.status.pack(side="right", padx=16)
+            font=(UI, 10),
+        ).pack(anchor="w")
+
+        chips = tk.Frame(top, bg=SURFACE)
+        chips.pack(side="right", padx=22)
+        self.chip_iface = self._chip(chips, "wlan0")
+        self.chip_mon = self._chip(chips, "managed")
+        self.chip_target = self._chip(chips, "no target")
+        self.status = tk.Label(top, text=f"v{APP_VER}", bg=SURFACE, fg=MUTED, font=(UI, 10))
+        self.status.pack(side="right", padx=(0, 8))
+
+        tk.Frame(self, bg=LINE, height=1).pack(fill="x")
 
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True)
 
-        nav = tk.Frame(body, bg=SURFACE, width=168)
+        nav = tk.Frame(body, bg=SURFACE, width=196)
         nav.pack(side="left", fill="y")
         nav.pack_propagate(False)
+        tk.Label(nav, text="WORKSPACE", bg=SURFACE, fg=MUTED, font=(UI, 8), anchor="w").pack(
+            fill="x", padx=18, pady=(18, 6)
+        )
         for name in ("Station", "Scan", "Attack", "Crack", "Proxy"):
-            tk.Button(
+            btn = tk.Button(
                 nav,
-                text=name,
+                text=f"  {name}",
                 command=lambda n=name: self.show(n),
-                bg=RAISED,
+                bg=SURFACE,
                 fg=FG,
                 activebackground=ACCENT,
                 activeforeground=BG,
                 relief="flat",
-                font=("sans-serif", 12),
-                pady=12,
+                anchor="w",
+                font=(UI, 12),
+                pady=11,
                 cursor="hand2",
-            ).pack(fill="x", padx=10, pady=4)
+                bd=0,
+            )
+            btn.pack(fill="x", padx=10, pady=1)
+            self.nav_btns[name] = btn
 
         self.stage = tk.Frame(body, bg=BG)
-        self.stage.pack(side="left", fill="both", expand=True, padx=16, pady=12)
+        self.stage.pack(side="left", fill="both", expand=True, padx=22, pady=18)
         self.pages = {
             "Station": self._page_station(),
             "Scan": self._page_scan(),
@@ -172,110 +198,199 @@ class App(tk.Tk):
         }
         self.show("Station")
 
-        log_wrap = tk.Frame(self, bg=BG)
-        log_wrap.pack(fill="both", padx=12, pady=(0, 12))
-        tk.Label(log_wrap, text="OUTPUT", bg=BG, fg=MUTED, font=("sans-serif", 9)).pack(anchor="w")
+        log_wrap = tk.Frame(self, bg=CARD, highlightbackground=LINE, highlightthickness=1)
+        log_wrap.pack(fill="both", padx=16, pady=(0, 14))
+        log_bar = tk.Frame(log_wrap, bg=CARD)
+        log_bar.pack(fill="x")
+        tk.Label(log_bar, text="OUTPUT", bg=CARD, fg=MUTED, font=(UI, 8)).pack(side="left", padx=12, pady=8)
+        tk.Button(
+            log_bar,
+            text="Clear",
+            command=self._clear_log,
+            bg=CARD,
+            fg=MUTED,
+            activebackground=RAISED,
+            activeforeground=FG,
+            relief="flat",
+            font=(UI, 9),
+            cursor="hand2",
+            bd=0,
+        ).pack(side="right", padx=8)
         self.log = tk.Text(
             log_wrap,
-            height=8,
-            bg="#050706",
-            fg=ACCENT,
+            height=7,
+            bg="#090c0a",
+            fg=FG,
             insertbackground=FG,
             relief="flat",
-            font=("monospace", 10),
+            font=(MONO, 10),
             wrap="word",
+            padx=12,
+            pady=8,
+            bd=0,
         )
         self.log.pack(fill="both", expand=True)
+        self.log.tag_configure("cmd", foreground=MUTED)
+        self.log.tag_configure("bad", foreground=DANGER)
+        self.log.tag_configure("ok", foreground=ACCENT)
+
+    def _chip(self, parent: tk.Widget, text: str) -> tk.Label:
+        lbl = tk.Label(
+            parent,
+            text=text,
+            bg=RAISED,
+            fg=FG,
+            font=(UI, 10),
+            padx=10,
+            pady=4,
+        )
+        lbl.pack(side="left", padx=4)
+        return lbl
+
+    def _refresh_status(self, *_args: object) -> None:
+        vals = self._vals()
+        self.chip_iface.config(text=vals["iface"] or "no iface")
+        if vals["mon"]:
+            self.chip_mon.config(text=vals["mon"], fg=ACCENT)
+        else:
+            self.chip_mon.config(text="managed", fg=MUTED)
+        name = vals["essid"] or vals["bssid"] or "no target"
+        self.chip_target.config(text=name, fg=ACCENT if vals["bssid"] else MUTED)
+        chan = vals["channel"] or "—"
+        self.target_line.set(f"{name}    channel {chan}    {vals['bssid'] or 'no BSSID'}")
+
+    def _set_busy(self, busy: bool) -> None:
+        self.status.config(text="working…" if busy else f"v{APP_VER}", fg=WARN if busy else MUTED)
 
     def show(self, name: str) -> None:
         for child in self.stage.winfo_children():
             child.pack_forget()
         self.pages[name].pack(fill="both", expand=True)
         self.page.set(name)
+        for key, btn in self.nav_btns.items():
+            if key == name:
+                btn.config(bg=ACCENT, fg=BG)
+            else:
+                btn.config(bg=SURFACE, fg=FG)
+
+    def _heading(self, parent: tk.Widget, title: str, subtitle: str) -> None:
+        tk.Label(parent, text=title, bg=BG, fg=FG, font=(UI, 26, "bold")).pack(anchor="w")
+        tk.Label(parent, text=subtitle, bg=BG, fg=MUTED, font=(UI, 11)).pack(anchor="w", pady=(2, 14))
+
+    def _card(self, parent: tk.Widget) -> tk.Frame:
+        outer = tk.Frame(parent, bg=CARD, highlightbackground=LINE, highlightthickness=1)
+        inner = tk.Frame(outer, bg=CARD)
+        inner.pack(fill="both", expand=True, padx=16, pady=14)
+        outer.inner = inner  # type: ignore[attr-defined]
+        return outer
 
     def _label(self, parent: tk.Widget, text: str) -> None:
-        tk.Label(parent, text=text, bg=BG, fg=MUTED, font=("sans-serif", 9)).pack(anchor="w")
+        tk.Label(parent, text=text.upper(), bg=CARD, fg=MUTED, font=(UI, 8)).pack(anchor="w", pady=(8, 2))
 
-    def _entry(self, parent: tk.Widget, key: str) -> None:
-        self._label(parent, key)
+    def _entry(self, parent: tk.Widget, key: str, caption: str) -> None:
+        self._label(parent, caption)
         tk.Entry(
             parent,
             textvariable=self.vars[key],
-            bg=SURFACE,
+            bg=BG,
             fg=FG,
-            insertbackground=FG,
+            insertbackground=ACCENT,
             relief="flat",
-            font=("monospace", 11),
-        ).pack(fill="x", ipady=6, pady=(0, 8))
+            highlightthickness=1,
+            highlightbackground=LINE,
+            highlightcolor=ACCENT,
+            font=(MONO, 11),
+        ).pack(fill="x", ipady=7)
 
-    def _buttons(self, parent: tk.Widget, pairs: list[tuple[str, object]]) -> None:
-        row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", pady=8)
-        for text, fn in pairs:
-            tk.Button(
-                row,
-                text=text,
-                command=fn,
-                bg=ACCENT,
-                fg=BG,
-                activebackground="#8dffc0",
-                activeforeground=BG,
-                relief="flat",
-                font=("sans-serif", 11, "bold"),
-                padx=12,
-                pady=8,
-                cursor="hand2",
-            ).pack(side="left", padx=(0, 8))
+    def _btn(self, parent: tk.Widget, text: str, fn: object, kind: str = "primary") -> tk.Button:
+        styles = {
+            "primary": (ACCENT, BG, "#b8ffd8"),
+            "ghost": (RAISED, FG, "#2a3830"),
+            "danger": ("#3a1818", DANGER, "#542222"),
+        }
+        bg, fg, active = styles[kind]
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=fn,
+            bg=bg,
+            fg=fg,
+            activebackground=active,
+            activeforeground=BG if kind == "primary" else FG,
+            relief="flat",
+            font=(UI, 11, "bold"),
+            padx=14,
+            pady=9,
+            cursor="hand2",
+            bd=0,
+        )
+        btn.pack(side="left", padx=(0, 8))
+        return btn
 
     def _page_station(self) -> tk.Frame:
         page = tk.Frame(self.stage, bg=BG)
-        tk.Label(page, text="Station", bg=BG, fg=FG, font=("sans-serif", 22, "bold")).pack(anchor="w")
-        tk.Label(
-            page,
-            text="Set the card and the target. Scan fills BSSID from a real AP list.",
-            bg=BG,
-            fg=MUTED,
-        ).pack(anchor="w", pady=(0, 10))
+        self._heading(page, "Station", "Set the wireless card and the network you are working on.")
         grid = tk.Frame(page, bg=BG)
-        grid.pack(fill="x")
-        left = tk.Frame(grid, bg=BG)
-        right = tk.Frame(grid, bg=BG)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 12))
-        right.pack(side="left", fill="both", expand=True)
-        for key in ("iface", "mon", "channel", "bssid"):
-            self._entry(left, key)
-        for key in ("essid", "client", "cap", "wordlist"):
-            self._entry(right, key)
-        self._buttons(
-            page,
-            [
-                ("Save", self._save),
-                ("Detect wireless", self._detect),
-                ("Monitor mode", self._monitor),
-                ("Restore Wi-Fi", self._restore),
-                ("Install tools", self._install),
-                ("Check for updates", self._check_update),
-            ],
-        )
+        grid.pack(fill="both", expand=True)
+        left_card = self._card(grid)
+        right_card = self._card(grid)
+        left_card.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        right_card.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        left, right = left_card.inner, right_card.inner  # type: ignore[attr-defined]
+        tk.Label(left, text="Radio", bg=CARD, fg=FG, font=(UI, 13, "bold")).pack(anchor="w")
+        tk.Label(right, text="Target", bg=CARD, fg=FG, font=(UI, 13, "bold")).pack(anchor="w")
+        for key, caption in (("iface", "Interface"), ("mon", "Monitor"), ("channel", "Channel")):
+            self._entry(left, key, caption)
+        for key, caption in (
+            ("bssid", "BSSID"),
+            ("essid", "Network name"),
+            ("client", "Client"),
+            ("wordlist", "Wordlist"),
+        ):
+            self._entry(right, key, caption)
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x", pady=(14, 0))
+        self._btn(row, "Save", self._save)
+        self._btn(row, "Detect wireless", self._detect, "ghost")
+        self._btn(row, "Monitor mode", self._monitor, "ghost")
+        self._btn(row, "Restore Wi-Fi", self._restore, "ghost")
+        self._btn(row, "Install tools", self._install, "ghost")
+        self._btn(row, "Check for updates", self._check_update, "ghost")
         return page
 
     def _page_scan(self) -> tk.Frame:
         page = tk.Frame(self.stage, bg=BG)
-        tk.Label(page, text="Networks", bg=BG, fg=FG, font=("sans-serif", 22, "bold")).pack(anchor="w")
-        tk.Label(
-            page,
-            text="Scans for a few seconds, then lists access points. Click one to lock it.",
-            bg=BG,
-            fg=MUTED,
-        ).pack(anchor="w", pady=(0, 8))
+        self._heading(page, "Networks", "Scan, then click an access point. Click a client to lock that station.")
+        bar = tk.Frame(page, bg=BG)
+        bar.pack(fill="x", pady=(0, 10))
+        tk.Label(bar, text="DURATION", bg=BG, fg=MUTED, font=(UI, 8)).pack(side="left", padx=(0, 8))
+        for seconds in ("8", "15", "30"):
+            tk.Radiobutton(
+                bar,
+                text=f"{seconds}s",
+                variable=self.scan_for,
+                value=seconds,
+                bg=BG,
+                fg=FG,
+                selectcolor=CARD,
+                activebackground=BG,
+                activeforeground=ACCENT,
+                font=(UI, 11),
+                highlightthickness=0,
+            ).pack(side="left", padx=(0, 6))
+        self._btn(bar, "Scan", self._scan)
+        self._btn(bar, "Stop", self._stop, "ghost")
+        self.ap_count = tk.Label(bar, text="0 networks", bg=BG, fg=MUTED, font=(UI, 10))
+        self.ap_count.pack(side="right")
+
         cols = ("bssid", "ch", "pwr", "enc", "essid")
-        self.tree = ttk.Treeview(page, columns=cols, show="headings", height=12)
+        self.tree = ttk.Treeview(page, columns=cols, show="headings", height=9)
         for col, title, width in (
             ("bssid", "BSSID", 180),
             ("ch", "CH", 50),
-            ("pwr", "PWR", 60),
-            ("enc", "ENC", 120),
-            ("essid", "ESSID", 240),
+            ("pwr", "SIGNAL", 70),
+            ("enc", "ENCRYPTION", 140),
+            ("essid", "NETWORK", 260),
         ):
             self.tree.heading(col, text=title)
             self.tree.column(col, width=width, anchor="w")
@@ -283,88 +398,140 @@ class App(tk.Tk):
         self.tree.bind("<<TreeviewSelect>>", self._pick_ap)
         style = ttk.Style(self)
         style.theme_use("clam")
-        style.configure("Treeview", background=SURFACE, fieldbackground=SURFACE, foreground=FG, rowheight=28)
-        style.configure("Treeview.Heading", background=RAISED, foreground=ACCENT)
-        self._buttons(page, [("Scan", self._scan), ("Stop", self._stop)])
+        style.configure(
+            "Treeview",
+            background=CARD,
+            fieldbackground=CARD,
+            foreground=FG,
+            borderwidth=0,
+            rowheight=30,
+            font=(MONO, 10),
+        )
+        style.configure("Treeview.Heading", background=RAISED, foreground=ACCENT, relief="flat", font=(UI, 9))
+        style.map("Treeview", background=[("selected", "#163328")], foreground=[("selected", ACCENT)])
+        style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
+
+        tk.Label(page, text="CLIENTS ON THE SELECTED NETWORK", bg=BG, fg=MUTED, font=(UI, 8)).pack(
+            anchor="w", pady=(12, 4)
+        )
+        self.client_tree = ttk.Treeview(page, columns=("mac", "pwr", "probes"), show="headings", height=4)
+        for col, title, width in (("mac", "CLIENT", 220), ("pwr", "SIGNAL", 80), ("probes", "PROBES", 360)):
+            self.client_tree.heading(col, text=title)
+            self.client_tree.column(col, width=width, anchor="w")
+        self.client_tree.pack(fill="x")
+        self.client_tree.bind("<<TreeviewSelect>>", self._pick_client)
         return page
 
     def _page_attack(self) -> tk.Frame:
         page = tk.Frame(self.stage, bg=BG)
-        tk.Label(page, text="Attack", bg=BG, fg=FG, font=("sans-serif", 22, "bold")).pack(anchor="w")
-        tk.Label(page, text="Uses the station target. Monitor mode has to be on.", bg=BG, fg=MUTED).pack(
-            anchor="w", pady=(0, 8)
-        )
-        self._buttons(
+        self._heading(page, "Attack", "Runs against the locked network. Monitor mode has to be on.")
+        tk.Label(page, textvariable=self.target_line, bg=BG, fg=ACCENT, font=(MONO, 11)).pack(anchor="w", pady=(0, 12))
+        self._action(
             page,
-            [
-                ("Deauth", self._deauth),
-                ("Fake auth", self._fakeauth),
-                ("Handshake", self._handshake),
-                ("Stop", self._stop),
-            ],
+            "Deauth",
+            "Send a short deauth burst. Uses the client field when it is a real MAC.",
+            "Send deauth",
+            self._deauth,
+            "danger",
         )
+        self._action(
+            page,
+            "Fake auth",
+            "Associate to the locked access point with the network name you set.",
+            "Fake auth",
+            self._fakeauth,
+            "ghost",
+        )
+        self._action(
+            page,
+            "Handshake",
+            "Capture on the locked channel, deauth, then crack with the wordlist if it exists.",
+            "Capture handshake",
+            self._handshake,
+            "primary",
+        )
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x", pady=(8, 0))
+        self._btn(row, "Stop", self._stop, "ghost")
         return page
 
     def _page_crack(self) -> tk.Frame:
         page = tk.Frame(self.stage, bg=BG)
-        tk.Label(page, text="Crack", bg=BG, fg=FG, font=("sans-serif", 22, "bold")).pack(anchor="w")
-        tk.Label(
-            page,
-            text="WPA uses the wordlist and the newest capture. Hashcat uses a pcapng from hcxdumptool.",
-            bg=BG,
-            fg=MUTED,
-        ).pack(anchor="w", pady=(0, 8))
-        self._buttons(
-            page,
-            [
-                ("Crack WPA", self._crack_wpa),
-                ("hcx capture", self._hcx),
-                ("Hashcat 22000", self._hashcat),
-                ("Stop", self._stop),
-            ],
-        )
+        self._heading(page, "Crack", "WPA uses the newest capture. Hashcat uses a pcapng from hcxdumptool.")
+        tk.Label(page, textvariable=self.target_line, bg=BG, fg=ACCENT, font=(MONO, 11)).pack(anchor="w", pady=(0, 12))
+        self._action(page, "WPA wordlist", "aircrack-ng against the latest .cap and your wordlist.", "Crack WPA", self._crack_wpa, "primary")
+        self._action(page, "Modern capture", "hcxdumptool writes ~/.acs/hcx.pcapng for about 25 seconds.", "Start hcx capture", self._hcx, "ghost")
+        self._action(page, "Hashcat 22000", "Convert that pcapng and run hashcat mode 22000.", "Run hashcat", self._hashcat, "ghost")
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x", pady=(8, 0))
+        self._btn(row, "Stop", self._stop, "ghost")
         return page
+
+    def _action(self, parent: tk.Widget, title: str, body: str, button: str, fn: object, kind: str) -> None:
+        card = self._card(parent)
+        card.pack(fill="x", pady=(0, 8))
+        inner = card.inner  # type: ignore[attr-defined]
+        tk.Label(inner, text=title, bg=CARD, fg=FG, font=(UI, 13, "bold")).pack(anchor="w")
+        tk.Label(inner, text=body, bg=CARD, fg=MUTED, font=(UI, 10), wraplength=640, justify="left").pack(anchor="w", pady=(2, 8))
+        row = tk.Frame(inner, bg=CARD)
+        row.pack(anchor="w")
+        self._btn(row, button, fn, kind)
 
     def _page_proxy(self) -> tk.Frame:
         page = tk.Frame(self.stage, bg=BG)
-        tk.Label(page, text="Proxy chain", bg=BG, fg=FG, font=("sans-serif", 22, "bold")).pack(anchor="w")
-        tk.Label(
-            page,
-            text="Pulls live proxy addresses from GitHub and writes a proxychains file.",
-            bg=BG,
-            fg=MUTED,
-        ).pack(anchor="w", pady=(0, 8))
-        row = tk.Frame(page, bg=BG)
-        row.pack(fill="x")
+        self._heading(page, "Proxy chain", "Pull live addresses from GitHub and write a proxychains file.")
+        bar = tk.Frame(page, bg=BG)
+        bar.pack(fill="x", pady=(0, 10))
         for kind in ("socks5", "socks4", "http"):
             tk.Radiobutton(
-                row,
+                bar,
                 text=kind,
                 variable=self.kind,
                 value=kind,
                 bg=BG,
                 fg=FG,
-                selectcolor=SURFACE,
+                selectcolor=CARD,
                 activebackground=BG,
                 activeforeground=ACCENT,
-            ).pack(side="left", padx=(0, 12))
-        tk.Label(row, text="hops", bg=BG, fg=MUTED).pack(side="left")
-        tk.Entry(row, textvariable=self.hops, width=4, bg=SURFACE, fg=FG, relief="flat").pack(
-            side="left", padx=8, ipady=4
-        )
+                font=(UI, 11),
+                highlightthickness=0,
+            ).pack(side="left", padx=(0, 10))
+        tk.Label(bar, text="HOPS", bg=BG, fg=MUTED, font=(UI, 8)).pack(side="left", padx=(8, 6))
+        tk.Entry(
+            bar,
+            textvariable=self.hops,
+            width=4,
+            bg=CARD,
+            fg=FG,
+            insertbackground=ACCENT,
+            relief="flat",
+            font=(MONO, 11),
+            highlightthickness=1,
+            highlightbackground=LINE,
+        ).pack(side="left", ipady=4)
         self.proxy_list = tk.Listbox(
-            page, bg=SURFACE, fg=FG, selectbackground=ACCENT, selectforeground=BG, relief="flat", font=("monospace", 11)
-        )
-        self.proxy_list.pack(fill="both", expand=True, pady=8)
-        self._buttons(
             page,
-            [
-                ("Pull from GitHub", self._pull_proxies),
-                ("Save chain", self._save_chain),
-                ("Test chain", self._test_chain),
-            ],
+            bg=CARD,
+            fg=FG,
+            selectbackground="#163328",
+            selectforeground=ACCENT,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=LINE,
+            font=(MONO, 11),
+            activestyle="none",
+            bd=0,
         )
+        self.proxy_list.pack(fill="both", expand=True, pady=(0, 10))
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x")
+        self._btn(row, "Pull from GitHub", self._pull_proxies)
+        self._btn(row, "Save chain", self._save_chain, "ghost")
+        self._btn(row, "Test chain", self._test_chain, "ghost")
         return page
+
+    def _clear_log(self) -> None:
+        self.log.delete("1.0", "end")
 
     def _vals(self) -> dict[str, str]:
         return {k: v.get().strip() for k, v in self.vars.items()}
@@ -401,7 +568,13 @@ class App(tk.Tk):
         try:
             while True:
                 line = self.log_q.get_nowait()
-                self.log.insert("end", line)
+                tag = "ok"
+                low = line.lower()
+                if line.startswith("$"):
+                    tag = "cmd"
+                elif any(word in low for word in ("missing", "fail", "error", "not found", "timed out")):
+                    tag = "bad"
+                self.log.insert("end", line, tag)
                 self.log.see("end")
         except queue.Empty:
             pass
@@ -413,6 +586,7 @@ class App(tk.Tk):
             return
 
         def work() -> None:
+            self.after(0, lambda: self._set_busy(True))
             self._write("$ " + " ".join(args))
             try:
                 self.proc = subprocess.Popen(
@@ -441,6 +615,8 @@ class App(tk.Tk):
                 self._write(f"not found: {args[0]}")
             except Exception as exc:  # noqa: BLE001
                 self._write(str(exc))
+            finally:
+                self.after(0, lambda: self._set_busy(False))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -548,25 +724,46 @@ class App(tk.Tk):
             old.unlink(missing_ok=True)
 
         def work() -> None:
-            self._write(f"scanning {mon} for 12s")
+            try:
+                seconds = max(5, min(60, int(self.scan_for.get())))
+            except ValueError:
+                seconds = 15
+            self.after(0, lambda: self._set_busy(True))
+            self._write(f"scanning {mon} for {seconds}s")
             cmd = ["airodump-ng", "--band", "abg", "--output-format", "csv", "-w", prefix, mon]
             if have("timeout"):
-                cmd = ["timeout", "12", *cmd]
+                cmd = ["timeout", str(seconds), *cmd]
             try:
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=seconds + 8)
             except subprocess.TimeoutExpired:
                 pass
             csvs = sorted(HOME.glob("scan-*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
             rows = parse_airodump(csvs[0]) if csvs else []
-            self.after(0, lambda: self._fill_aps(rows))
+            clients = parse_clients(csvs[0]) if csvs else []
+            self.after(0, lambda: self._fill_aps(rows, clients))
+            self.after(0, lambda: self._set_busy(False))
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _fill_aps(self, rows: list[tuple[str, str, str, str, str]]) -> None:
+    def _fill_aps(
+        self,
+        rows: list[tuple[str, str, str, str, str]],
+        clients: list[tuple[str, str, str, str]] | None = None,
+    ) -> None:
+        def strength(row: tuple[str, str, str, str, str]) -> int:
+            try:
+                return int(row[2])
+            except ValueError:
+                return -999
+
+        rows = sorted(rows, key=strength, reverse=True)
+        self.clients = clients or []
         self.tree.delete(*self.tree.get_children())
+        self.client_tree.delete(*self.client_tree.get_children())
         for row in rows:
             self.tree.insert("", "end", values=row)
-        self._write(f"{len(rows)} access points")
+        self.ap_count.config(text=f"{len(rows)} networks")
+        self._write(f"{len(rows)} access points, {len(self.clients)} clients")
 
     def _pick_ap(self, _event: object) -> None:
         sel = self.tree.selection()
@@ -576,8 +773,23 @@ class App(tk.Tk):
         self.vars["bssid"].set(bssid)
         self.vars["channel"].set(str(ch).strip())
         self.vars["essid"].set(essid)
+        self.client_tree.delete(*self.client_tree.get_children())
+        matched = [c for c in self.clients if c[2].lower() == bssid.lower()]
+        for mac, power, _bssid, probes in matched:
+            self.client_tree.insert("", "end", values=(mac, power, probes))
+        if len(matched) == 1:
+            self.vars["client"].set(matched[0][0])
         self._save()
         self._write(f"locked {essid or bssid} ch {ch}")
+
+    def _pick_client(self, _event: object) -> None:
+        sel = self.client_tree.selection()
+        if not sel:
+            return
+        mac = self.client_tree.item(sel[0], "values")[0]
+        self.vars["client"].set(mac)
+        self._save()
+        self._write(f"client {mac}")
 
     def _deauth(self) -> None:
         mon = self._need_mon()
@@ -812,6 +1024,23 @@ def parse_airodump(path: Path) -> list[tuple[str, str, str, str, str]]:
             continue
         enc = " ".join(x for x in (parts[5], parts[6], parts[7]) if x)
         rows.append((parts[0], parts[3], parts[8], enc, essid))
+    return rows
+
+
+def parse_clients(path: Path) -> list[tuple[str, str, str, str]]:
+    rows: list[tuple[str, str, str, str]] = []
+    started = False
+    for line in path.read_text(errors="replace").splitlines():
+        if line.startswith("Station MAC"):
+            started = True
+            continue
+        if not started:
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 6 or not MAC_RE.match(parts[0]):
+            continue
+        probes = parts[6] if len(parts) > 6 else ""
+        rows.append((parts[0], parts[3], parts[5], probes))
     return rows
 
 
