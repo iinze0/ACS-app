@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ACS
+GenericName=Air Crack Station
+Comment=Air Crack Station desktop app by Pakun and iinze0
+Exec=pkexec /usr/local/bin/acs-app
+Icon=network-wireless
+Terminal=false
+Categories=Network;System;

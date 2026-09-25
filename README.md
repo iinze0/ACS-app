@@ -1,31 +1,34 @@
 # ACS-app
 
-Air Crack Station as an app. Made by **Pakun & iinze0**.
+Desktop app for Air Crack Station. Made by **Pakun & iinze0**.
 
-This is the UI. The Kali terminal script lives in [iinze0/ACS](https://github.com/iinze0/ACS).
+This is a window you open on Kali. It is not a website and it does not use npm.
 
-## What it does
+The terminal script is still [iinze0/ACS](https://github.com/iinze0/ACS).
 
-- Lab rack for interface, BSSID, channel, capture file, and wordlist
-- Monitor, capture, inject, and crack screens that fill commands from that rack
-- Full aircrack-ng suite reference
-- **Proxy** — pulls live proxy addresses from GitHub lists and builds a proxychains file
-
-The browser does not transmit. Copy a command or download `acs.sh` and run it on Kali.
-
-Authorized lab / pentest use only.
-
-## Run on Kali
-
-Do **not** use `sudo apt install npm`. Those packages 404 on the Kali mirror.
+## Install
 
 ```bash
 cd ~/ACS-app
-bash setup-kali.sh
-npm install
-npm run dev
+git pull
+sudo bash install.sh
 ```
 
-Then open http://127.0.0.1:8080
+Then open **ACS** from the application menu.
 
-`setup-kali.sh` drops Node 22 into `/usr/local` from nodejs.org. If `node` is still the old command after that, run `hash -r`.
+Or run it once without installing:
+
+```bash
+sudo python3 acs_app.py
+```
+
+If that says Tk is missing:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-tk
+```
+
+Do not install `npm`. That package is broken on the Kali mirror and this app does not need it.
+
+Authorized lab / pentest use only.
