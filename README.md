@@ -1,36 +1,50 @@
-# ACS-app
+# ACS — Air Crack Station
 
-Desktop app for Air Crack Station. Made by **Pakun & iinze0**.
+**Made by Pakun & iinze0**
 
-This is a window you open on Kali. It is not a website and it does not use npm.
+This is the desktop app.
 
-The terminal script is still [iinze0/ACS](https://github.com/iinze0/ACS).
-
-## Install
+## Install (use dpkg — apt /tmp will fail)
 
 ```bash
-cd ~/ACS-app
-git pull
-sudo bash install.sh
+wget -O /tmp/acs-app.deb https://github.com/iinze0/ACS-app/releases/download/v1.2.0/acs-app_1.2.0_all.deb
+sudo dpkg -i /tmp/acs-app.deb
+sudo ACS-app
 ```
 
-Then open **ACS** from the application menu.
-
-Or run it once without installing:
+One-liner:
 
 ```bash
-sudo python3 acs_app.py
+curl -fsSL https://raw.githubusercontent.com/iinze0/ACS-app/main/install-acs-app.sh | sudo bash
+sudo ACS-app
 ```
 
-If that says Tk is missing:
+You should see **v1.2.0** and **Made by Pakun & iinze0**.
 
 ```bash
-sudo apt-get update
+dpkg -s acs-app | grep Version
+```
+
+Uninstall: `sudo apt purge acs-app`
+
+If the window says Tk is missing:
+
+```bash
 sudo apt-get install -y python3-tk
+sudo ACS-app
 ```
 
-Do not install `npm`. That package is broken on the Kali mirror and this app does not need it.
+## Launch
 
-Authorized lab / pentest use only.
+```bash
+sudo ACS-app
+```
 
-On each launch, ACS checks GitHub and installs a newer version by itself. Use **Check for updates** on the Station page to do it by hand. Skip the check with `ACS_NO_UPDATE=1`.
+Also: **Applications → ACS**
+
+Authorized lab / pentest use only. On launch, the app checks GitHub and installs a newer package by itself.
+
+```
+github.com/iinze0
+github.com/iinze0/ACS-app
+```

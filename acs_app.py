@@ -27,8 +27,9 @@ except ImportError:
 HOME = Path.home() / ".acs"
 SESSION = HOME / "app-session.json"
 CONF = HOME / "proxychains.conf"
-APP_VER = "1.1.0"
+APP_VER = "1.2.0"
 APP_RAW = "https://raw.githubusercontent.com/iinze0/ACS-app/main/acs_app.py"
+APP_VERSION_URL = "https://raw.githubusercontent.com/iinze0/ACS-app/main/VERSION"
 
 BG = "#07090a"
 SURFACE = "#101614"
@@ -838,7 +839,41 @@ def remote_app_version(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def fetch_remote_version() -> str | None:
+    try:
+        req = urllib.request.Request(APP_VERSION_URL, headers={"User-Agent": "acs-app"})
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            version = resp.read().decode("utf-8", "replace").strip()
+        if version:
+            return version
+    except Exception:
+        pass
+    return remote_app_version(fetch_remote_app() or "")
+
+
+def install_deb(version: str) -> bool:
+    if os.geteuid() != 0 or not version:
+        return False
+    url = f"https://github.com/iinze0/ACS-app/releases/download/v{version}/acs-app_{version}_all.deb"
+    deb = Path(f"/tmp/acs-app_{version}_all.deb")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "acs-app"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            deb.write_bytes(resp.read())
+    except Exception:
+        return False
+    check = subprocess.run(["dpkg-deb", "-I", str(deb)], capture_output=True)
+    if check.returncode != 0:
+        deb.unlink(missing_ok=True)
+        return False
+    installed = subprocess.run(["dpkg", "-i", str(deb)])
+    return installed.returncode == 0
+
+
 def install_app_update(text: str) -> bool:
+    remote = remote_app_version(text) or ""
+    if install_deb(remote):
+        return True
     path = Path(__file__).resolve()
     if (path.parent / ".git").is_dir() and have("git"):
         proc = subprocess.run(
@@ -862,20 +897,21 @@ def install_app_update(text: str) -> bool:
 
 def restart_app() -> None:
     os.environ["ACS_JUST_UPDATED"] = "1"
-    script = str(Path(__file__).resolve())
+    packaged = Path("/usr/lib/acs-app/acs_app.py")
+    script = str(packaged if packaged.is_file() else Path(__file__).resolve())
     os.execv(sys.executable, [sys.executable, script, *sys.argv[1:]])
 
 
 def auto_update_app() -> None:
     if os.environ.get("ACS_NO_UPDATE") == "1" or os.environ.get("ACS_JUST_UPDATED") == "1":
         return
-    text = fetch_remote_app()
-    if not text:
-        return
-    remote = remote_app_version(text)
+    remote = fetch_remote_version()
     if not remote or version_tuple(remote) <= version_tuple(APP_VER):
         return
-    if install_app_update(text):
+    if install_deb(remote):
+        restart_app()
+    text = fetch_remote_app()
+    if text and install_app_update(text):
         restart_app()
 
 

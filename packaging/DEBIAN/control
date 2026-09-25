@@ -1,0 +1,13 @@
+Package: acs-app
+Version: 1.2.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3
+Recommends: python3-tk, aircrack-ng, iw, wireless-tools, hashcat, hcxdumptool, hcxtools, proxychains4, curl
+Maintainer: Pakun & iinze0 <iinze0@users.noreply.github.com>
+Homepage: https://github.com/iinze0/ACS-app
+Description: ACS app — Air Crack Station (Made by Pakun & iinze0)
+ Desktop app for authorized lab / pentest work.
+ Launch with: sudo ACS-app
+Installed-Size: 80
