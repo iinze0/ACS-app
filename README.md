@@ -1,19 +1,22 @@
 # ACS-app — Air Crack Station
 
-Python desktop client for [ACS](https://github.com/iinze0/ACS).
+Python desktop client for **[ACS](https://github.com/iinze0/ACS)**.
 
 [![release](https://img.shields.io/github/v/release/iinze0/ACS-app?style=flat-square)](https://github.com/iinze0/ACS-app/releases/latest)
-Made by [Pakun](https://github.com/brazyqueso) & [iinze0](https://github.com/iinze0)
+[![license](https://img.shields.io/badge/license-MIT-0b7285?style=flat-square)](LICENSE)
+[![python](https://img.shields.io/badge/python-3-3776ab?style=flat-square)](#install)
+
+Made by [Pakun](https://github.com/brazyqueso) and [iinze0](https://github.com/iinze0)
 
 Same station, in a window. Ships as a `.deb`, launches with `sudo ACS-app`, and checks GitHub for a newer package on start.
 
 ## Family
 
-| Repo | What you get |
-|:-----|:-------------|
+| Repo | Role |
+|:-----|:-----|
 | **[ACS](https://github.com/iinze0/ACS)** | Shell station |
-| **[ACS-app](https://github.com/iinze0/ACS-app)** | This repo — Python desktop app |
-| **[ACS-cpp](https://github.com/iinze0/ACS-cpp)** | Native C++ / GTK app |
+| **[ACS-app](https://github.com/iinze0/ACS-app)** | This repo — Python desktop client |
+| **[ACS-cpp](https://github.com/iinze0/ACS-cpp)** | Native C++ / GTK client |
 
 ## Install
 
@@ -32,18 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/iinze0/ACS-app/main/install-acs-app
 sudo ACS-app
 ```
 
-Confirm the package:
-
 ```bash
-dpkg -s acs-app | grep Version
-```
-
-You should see **v1.4.0** and **Made by Pakun & iinze0**.
-
-Uninstall:
-
-```bash
-sudo apt purge acs-app
+dpkg -s acs-app | grep -E 'Version|Maintainer'
+sudo apt purge acs-app    # uninstall
 ```
 
 If the window reports missing Tk:
@@ -61,22 +55,16 @@ sudo ACS-app
 
 Also available from **Applications → ACS**.
 
-## Native build
-
-Prefer C++ / GTK? Install [ACS-cpp](https://github.com/iinze0/ACS-cpp):
-
-```bash
-wget -O /tmp/acs-cpp.deb https://github.com/iinze0/ACS-cpp/releases/download/v1.0.0/acs-cpp_1.0.0_amd64.deb
-sudo dpkg -i /tmp/acs-cpp.deb
-sudo ACS-cpp
-```
+Prefer a native binary? Use **[ACS-cpp](https://github.com/iinze0/ACS-cpp)**.
 
 ## Disclaimer
 
-Authorized lab and pentest use only. Only run this on networks you own or have written permission to test.
+Authorized lab and pentest use only. Run this only on networks you own or have written permission to test.
+
+---
 
 <p align="center">
   <a href="https://github.com/iinze0">iinze0</a> ·
   <a href="https://github.com/brazyqueso">Pakun</a> ·
-  <a href="https://github.com/iinze0/ACS-app">ACS-app</a>
+  <a href="LICENSE">MIT</a>
 </p>
