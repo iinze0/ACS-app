@@ -27,6 +27,16 @@ dpkg -s acs-app | grep Version
 
 Uninstall: `sudo apt purge acs-app`
 
+## C++ app
+
+The native build is on GitHub too: [iinze0/ACS-cpp](https://github.com/iinze0/ACS-cpp)
+
+```bash
+wget -O /tmp/acs-cpp.deb https://github.com/iinze0/ACS-cpp/releases/download/v1.0.0/acs-cpp_1.0.0_amd64.deb
+sudo dpkg -i /tmp/acs-cpp.deb
+sudo ACS-cpp
+```
+
 If the window says Tk is missing:
 
 ```bash
