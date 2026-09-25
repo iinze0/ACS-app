@@ -27,6 +27,8 @@ except ImportError:
 HOME = Path.home() / ".acs"
 SESSION = HOME / "app-session.json"
 CONF = HOME / "proxychains.conf"
+APP_VER = "1.1.0"
+APP_RAW = "https://raw.githubusercontent.com/iinze0/ACS-app/main/acs_app.py"
 
 BG = "#07090a"
 SURFACE = "#101614"
@@ -105,7 +107,7 @@ def relaunch_as_root() -> None:
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("ACS")
+        self.title(f"ACS {APP_VER}")
         self.geometry("1100x720")
         self.minsize(860, 560)
         self.configure(bg=BG)
@@ -251,6 +253,7 @@ class App(tk.Tk):
                 ("Monitor mode", self._monitor),
                 ("Restore Wi-Fi", self._restore),
                 ("Install tools", self._install),
+                ("Check for updates", self._check_update),
             ],
         )
         return page
@@ -766,6 +769,28 @@ class App(tk.Tk):
             return
         self._run([binary, "-f", str(CONF), "curl", "-fsSL", "--max-time", "25", "https://ifconfig.me"])
 
+    def _check_update(self) -> None:
+        def work() -> None:
+            text = fetch_remote_app()
+            remote = remote_app_version(text or "")
+            if not remote:
+                self.after(0, lambda: messagebox.showwarning("ACS", "Could not reach GitHub."))
+                return
+            if version_tuple(remote) <= version_tuple(APP_VER):
+                self.after(0, lambda: messagebox.showinfo("ACS", f"Already on {APP_VER}."))
+                return
+            if not install_app_update(text or ""):
+                self.after(0, lambda: messagebox.showerror("ACS", "Update failed a syntax check and was not installed."))
+                return
+
+            def go() -> None:
+                messagebox.showinfo("ACS", f"Updated to {remote}. Restarting.")
+                restart_app()
+
+            self.after(0, go)
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _close(self) -> None:
         self._stop()
         self._save()
@@ -789,9 +814,75 @@ def parse_airodump(path: Path) -> list[tuple[str, str, str, str, str]]:
     return rows
 
 
+def version_tuple(text: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for piece in text.split("."):
+        if piece.isdigit():
+            parts.append(int(piece))
+        else:
+            break
+    return tuple(parts) or (0,)
+
+
+def fetch_remote_app() -> str | None:
+    try:
+        req = urllib.request.Request(APP_RAW, headers={"User-Agent": "acs-app"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read().decode("utf-8", "replace")
+    except Exception:
+        return None
+
+
+def remote_app_version(text: str) -> str | None:
+    match = re.search(r'^APP_VER = "([^"]+)"', text, re.M)
+    return match.group(1) if match else None
+
+
+def install_app_update(text: str) -> bool:
+    path = Path(__file__).resolve()
+    if (path.parent / ".git").is_dir() and have("git"):
+        proc = subprocess.run(
+            ["git", "-C", str(path.parent), "pull", "--ff-only"],
+            text=True,
+            capture_output=True,
+        )
+        return proc.returncode == 0
+    if 'APP_VER = "' not in text:
+        return False
+    tmp = path.with_name("acs_app.py.new")
+    tmp.write_text(text)
+    proc = subprocess.run([sys.executable, "-m", "py_compile", str(tmp)], capture_output=True)
+    if proc.returncode != 0:
+        tmp.unlink(missing_ok=True)
+        return False
+    os.chmod(tmp, 0o755)
+    os.replace(tmp, path)
+    return True
+
+
+def restart_app() -> None:
+    os.environ["ACS_JUST_UPDATED"] = "1"
+    script = str(Path(__file__).resolve())
+    os.execv(sys.executable, [sys.executable, script, *sys.argv[1:]])
+
+
+def auto_update_app() -> None:
+    if os.environ.get("ACS_NO_UPDATE") == "1" or os.environ.get("ACS_JUST_UPDATED") == "1":
+        return
+    text = fetch_remote_app()
+    if not text:
+        return
+    remote = remote_app_version(text)
+    if not remote or version_tuple(remote) <= version_tuple(APP_VER):
+        return
+    if install_app_update(text):
+        restart_app()
+
+
 def main() -> None:
     relaunch_as_root()
     HOME.mkdir(parents=True, exist_ok=True)
+    auto_update_app()
     App().mainloop()
 
 

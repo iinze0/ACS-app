@@ -32,3 +32,5 @@ sudo apt-get install -y python3-tk
 Do not install `npm`. That package is broken on the Kali mirror and this app does not need it.
 
 Authorized lab / pentest use only.
+
+On each launch, ACS checks GitHub and installs a newer version by itself. Use **Check for updates** on the Station page to do it by hand. Skip the check with `ACS_NO_UPDATE=1`.
